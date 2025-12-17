@@ -23,6 +23,11 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
+// Health check para o EasyPanel/Docker
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', message: 'Servidor funcionando' });
+});
+
 // Rota principal - servir o HTML
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
