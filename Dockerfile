@@ -1,20 +1,20 @@
-# Use Node.js 20 (versão LTS recomendada)
+# Use Node.js 20 (versão LTS)
 FROM node:20-alpine
 
 # Criar diretório da aplicação
 WORKDIR /app
 
-# Copiar package.json e package-lock.json
-COPY package*.json ./
+# Copiar apenas o package.json (já que o lock não existe no repo)
+COPY package.json ./
 
-# Instalar dependências
-RUN npm ci --only=production
+# Instalar dependências (ajustado para funcionar sem o lockfile)
+RUN npm install --omit=dev
 
-# Copiar código da aplicação
+# Copiar o restante do código
 COPY . .
 
-# Expor a porta
+# Expor a porta que o server.js utiliza
 EXPOSE 3132
 
-# Comando para iniciar a aplicação
-CMD ["npm", "start"]
+# Comando para iniciar
+CMD ["node", "server.js"]
