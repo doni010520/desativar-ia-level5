@@ -5,6 +5,7 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
+// No Docker/EasyPanel, usamos 0.0.0.0 para garantir que o tráfego externo chegue ao container
 const PORT = process.env.PORT || 3132;
 
 // Configurar Supabase
@@ -34,34 +35,22 @@ app.get('/', (req, res) => {
 });
 
 // Função para gerar variações do telefone para busca
-// Banco SEMPRE tem 55 no início
-// Usuário digita apenas DDD + número (com ou sem 9)
 function gerarVariacoesTelefone(telefone) {
-  // Limpar o telefone (remover caracteres especiais)
   let telefoneLimpo = telefone.replace(/\D/g, '');
   
-  // Se usuário digitou com 55, remove (vamos adicionar depois)
   if (telefoneLimpo.startsWith('55')) {
     telefoneLimpo = telefoneLimpo.substring(2);
   }
   
   const variacoes = [];
   
-  // Se tem 11 dígitos (DDD + 9 + 8 dígitos)
   if (telefoneLimpo.length === 11) {
-    // Com 9: 55 + 11988887777 = 5511988887777
     variacoes.push('55' + telefoneLimpo);
-    
-    // Sem 9: 55 + 1188887777 = 551188887777
     const semNove = telefoneLimpo.substring(0, 2) + telefoneLimpo.substring(3);
     variacoes.push('55' + semNove);
   }
-  // Se tem 10 dígitos (DDD + 8 dígitos, sem 9)
   else if (telefoneLimpo.length === 10) {
-    // Sem 9: 55 + 1188887777 = 551188887777
     variacoes.push('55' + telefoneLimpo);
-    
-    // Com 9: 55 + 11988887777 = 5511988887777
     const comNove = telefoneLimpo.substring(0, 2) + '9' + telefoneLimpo.substring(2);
     variacoes.push('55' + comNove);
   }
@@ -75,96 +64,44 @@ app.post('/api/desativar-ia', async (req, res) => {
     const { telefone } = req.body;
 
     if (!telefone) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Telefone é obrigatório' 
-      });
+      return res.status(400).json({ success: false, message: 'Telefone é obrigatório' });
     }
 
-    // Gerar todas as variações possíveis do telefone
     const variacoes = gerarVariacoesTelefone(telefone);
-    
-    console.log(`📞 Buscando telefone com variações:`, variacoes);
-
-    // Criar query OR para todas as variações
     const orQuery = variacoes.map(v => `telefone.eq.${v}`).join(',');
 
-    // Buscar o registro pelo telefone (qualquer variação)
     const { data: leads, error: searchError } = await supabase
       .from('leads')
       .select('*')
       .or(orQuery);
 
     if (searchError) {
-      console.error('❌ Erro ao buscar:', searchError);
-      return res.status(500).json({ 
-        success: false, 
-        message: 'Erro ao buscar no banco de dados',
-        error: searchError.message
-      });
+      return res.status(500).json({ success: false, message: 'Erro no banco', error: searchError.message });
     }
 
     if (!leads || leads.length === 0) {
-      console.log('⚠️ Telefone não encontrado em nenhuma variação');
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Telefone não encontrado no banco de dados. Variações testadas: ' + variacoes.join(', ')
-      });
+      return res.status(404).json({ success: false, message: 'Telefone não encontrado' });
     }
 
     const lead = leads[0];
-    console.log(`✅ Lead encontrado: ${lead.nome} (${lead.telefone}) - Status atual: ${lead.ia_on_off}`);
 
-    // Verificar se já está desativado
     if (lead.ia_on_off === 'OFF') {
-      return res.json({ 
-        success: true, 
-        message: 'IA já estava desativada para este telefone',
-        lead: {
-          nome: lead.nome,
-          telefone: lead.telefone,
-          status_anterior: lead.ia_on_off,
-          status_atual: 'OFF'
-        }
-      });
+      return res.json({ success: true, message: 'IA já estava desativada', lead });
     }
 
-    // Atualizar para OFF
-    const { data: updatedData, error: updateError } = await supabase
+    const { error: updateError } = await supabase
       .from('leads')
       .update({ ia_on_off: 'OFF' })
-      .eq('id', lead.id)
-      .select();
+      .eq('id', lead.id);
 
     if (updateError) {
-      console.error('❌ Erro ao atualizar:', updateError);
-      return res.status(500).json({ 
-        success: false, 
-        message: 'Erro ao atualizar o banco de dados',
-        error: updateError.message
-      });
+      return res.status(500).json({ success: false, message: 'Erro ao atualizar' });
     }
 
-    console.log('✅ IA desativada com sucesso!');
-
-    res.json({ 
-      success: true, 
-      message: 'IA desativada com sucesso!',
-      lead: {
-        nome: lead.nome,
-        telefone: lead.telefone,
-        status_anterior: lead.ia_on_off,
-        status_atual: 'OFF'
-      }
-    });
+    res.json({ success: true, message: 'IA desativada com sucesso!', lead: { ...lead, ia_on_off: 'OFF' } });
 
   } catch (error) {
-    console.error('❌ Erro:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Erro interno do servidor',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Erro interno' });
   }
 });
 
@@ -172,20 +109,9 @@ app.post('/api/desativar-ia', async (req, res) => {
 app.post('/api/verificar-status', async (req, res) => {
   try {
     const { telefone } = req.body;
+    if (!telefone) return res.status(400).json({ success: false, message: 'Telefone obrigatório' });
 
-    if (!telefone) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Telefone é obrigatório' 
-      });
-    }
-
-    // Gerar todas as variações possíveis do telefone
     const variacoes = gerarVariacoesTelefone(telefone);
-    
-    console.log(`🔍 Verificando status com variações:`, variacoes);
-
-    // Criar query OR para todas as variações
     const orQuery = variacoes.map(v => `telefone.eq.${v}`).join(',');
 
     const { data: leads, error } = await supabase
@@ -193,41 +119,17 @@ app.post('/api/verificar-status', async (req, res) => {
       .select('nome, telefone, ia_on_off')
       .or(orQuery);
 
-    if (error) {
-      return res.status(500).json({ 
-        success: false, 
-        message: 'Erro ao buscar no banco de dados',
-        error: error.message
-      });
+    if (error || !leads || leads.length === 0) {
+      return res.status(404).json({ success: false, message: 'Não encontrado' });
     }
 
-    if (!leads || leads.length === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Telefone não encontrado. Variações testadas: ' + variacoes.join(', ')
-      });
-    }
-
-    console.log(`✅ Status encontrado: ${leads[0].nome} - IA: ${leads[0].ia_on_off}`);
-
-    res.json({ 
-      success: true, 
-      lead: leads[0]
-    });
-
+    res.json({ success: true, lead: leads[0] });
   } catch (error) {
-    console.error('❌ Erro:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Erro interno do servidor',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Erro interno' });
   }
 });
 
 // Iniciar servidor
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
-  console.log(`📱 Acesse: http://localhost:${PORT}`);
-  console.log(`🔗 Supabase URL: ${supabaseUrl}`);
 });
