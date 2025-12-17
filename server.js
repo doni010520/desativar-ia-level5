@@ -5,7 +5,7 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
-// Configuração para Docker/EasyPanel: escuta em 0.0.0.0 e usa porta variável
+// Porta configurada para o EasyPanel
 const PORT = process.env.PORT || 3132;
 
 // Configurar Supabase
@@ -13,7 +13,7 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error('❌ ERRO: Variáveis de ambiente SUPABASE_URL e SUPABASE_KEY não encontradas no EasyPanel!');
+  console.error('❌ ERRO: Variáveis de ambiente SUPABASE_URL e SUPABASE_KEY não encontradas!');
   process.exit(1);
 }
 
@@ -34,7 +34,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Função de normalização de telefone
+// Função de normalização de telefone (Padrão: 55 + DDD + Número)
 function gerarVariacoesTelefone(telefone) {
   let telefoneLimpo = telefone.replace(/\D/g, '');
   if (telefoneLimpo.startsWith('55')) {
@@ -65,9 +65,9 @@ app.post('/api/desativar-ia', async (req, res) => {
     const variacoes = gerarVariacoesTelefone(telefone);
     const orQuery = variacoes.map(v => `telefone.eq.${v}`).join(',');
 
-    // Busca o lead
+    // Busca o lead na tabela CORRETA: leads_energia_solar
     const { data: leads, error: searchError } = await supabase
-      .from('leads')
+      .from('leads_energia_solar')
       .select('*')
       .or(orQuery);
 
@@ -77,14 +77,14 @@ app.post('/api/desativar-ia', async (req, res) => {
     }
 
     if (!leads || leads.length === 0) {
-      return res.status(404).json({ success: false, message: 'Telefone não encontrado no banco.' });
+      return res.status(404).json({ success: false, message: 'Telefone não encontrado no banco de Energia Solar.' });
     }
 
     const lead = leads[0];
 
-    // Atualiza para OFF
+    // Atualiza o campo ia_on_off para OFF
     const { error: updateError } = await supabase
-      .from('leads')
+      .from('leads_energia_solar')
       .update({ ia_on_off: 'OFF' })
       .eq('id', lead.id);
 
@@ -93,7 +93,11 @@ app.post('/api/desativar-ia', async (req, res) => {
       return res.status(500).json({ success: false, message: `Erro ao atualizar: ${updateError.message}` });
     }
 
-    res.json({ success: true, message: 'IA desativada com sucesso!', lead: { ...lead, ia_on_off: 'OFF' } });
+    res.json({ 
+      success: true, 
+      message: 'IA desativada com sucesso!', 
+      lead: { ...lead, ia_on_off: 'OFF' } 
+    });
 
   } catch (error) {
     console.error('❌ Erro Interno:', error);
@@ -111,7 +115,7 @@ app.post('/api/verificar-status', async (req, res) => {
     const orQuery = variacoes.map(v => `telefone.eq.${v}`).join(',');
 
     const { data: leads, error } = await supabase
-      .from('leads')
+      .from('leads_energia_solar')
       .select('nome, telefone, ia_on_off')
       .or(orQuery);
 
@@ -130,8 +134,8 @@ app.post('/api/verificar-status', async (req, res) => {
   }
 });
 
-// Inicialização
+// Inicialização vinculando ao 0.0.0.0 para acesso externo no Docker
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
-  console.log(`📡 Aguardando conexões em 0.0.0.0:${PORT}`);
+  console.log(`🚀 Servidor pronto na porta ${PORT}`);
+  console.log(`📋 Tabela configurada: leads_energia_solar`);
 });
